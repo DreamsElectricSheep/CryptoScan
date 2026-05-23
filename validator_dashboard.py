@@ -367,8 +367,13 @@ body {
       </div>
     </div>
 
+    <div class="card" id="x-card" style="display:none">
+      <div class="card-title">X / Twitter</div>
+      <div id="x-body"></div>
+    </div>
+
     <div class="card" id="sh-card" style="display:none">
-      <div class="card-title">Social History</div>
+      <div class="card-title">Social History (Wayback Machine)</div>
       <div id="sh-rows"></div>
     </div>
 
@@ -545,6 +550,51 @@ function renderFlags(flags) {
   document.getElementById('flags').innerHTML = html;
 }
 
+function renderXProfile(metrics) {
+  const xp  = metrics.x_profile;
+  const card = document.getElementById('x-card');
+  const body = document.getElementById('x-body');
+  if (!xp) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  if (xp.not_found) {
+    body.innerHTML = `<div class="flag-item f-high">@${xp.handle || '?'} — account not found on X/Twitter (deleted, suspended, or never existed)</div>`;
+    return;
+  }
+
+  const age     = xp.account_days;
+  const ageFmt  = age != null ? (age >= 365 ? Math.floor(age/365)+'yr '+Math.floor((age%365)/30)+'mo' : age+'d') : 'unknown';
+  const ageCol  = ageColor(age);
+  const fol     = (xp.followers || 0).toLocaleString();
+  const folCol  = xp.followers >= 10000 ? 'var(--green)' : xp.followers >= 1000 ? 'var(--lime)' : xp.followers >= 100 ? 'var(--amber)' : 'var(--red)';
+  const verBadge = xp.verified ? '<span style="color:var(--blue);font-size:11px;margin-left:6px">&#10003; Verified</span>' : '';
+  const xUrl    = `https://x.com/${xp.handle}`;
+
+  body.innerHTML = `
+    <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:4px 0">
+      <div>
+        <div style="font-size:16px;font-weight:700">
+          <a href="${xUrl}" target="_blank" style="color:var(--blue);text-decoration:none">@${xp.handle}</a>${verBadge}
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">${xp.name || ''}</div>
+      </div>
+      <div class="metrics-grid" style="flex:1;min-width:280px;margin:0">
+        <div class="metric">
+          <div class="m-label">Account Age</div>
+          <div class="m-value" style="color:${ageCol}">${ageFmt}</div>
+        </div>
+        <div class="metric">
+          <div class="m-label">Followers</div>
+          <div class="m-value" style="color:${folCol}">${fol}</div>
+        </div>
+        <div class="metric">
+          <div class="m-label">Verified</div>
+          <div class="m-value ${xp.verified ? 'c-ok' : 'c-neu'}">${xp.verified ? 'Yes' : 'No'}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderSocialHistory(metrics) {
   const sh   = metrics.social_history || {};
   const keys = Object.keys(sh);
@@ -640,6 +690,7 @@ function showResults(d) {
   });
 
   renderFlags(d.flags);
+  renderXProfile(d.metrics);
   renderSocialHistory(d.metrics);
   renderMetrics(d.metrics);
 

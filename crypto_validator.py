@@ -109,6 +109,61 @@ def fetch_rugcheck(address):
     return _get(f"https://api.rugcheck.xyz/v1/tokens/{address}/report/summary", timeout=15)
 
 
+def _extract_twitter_handle(url):
+    """Extract @handle from a Twitter/X URL."""
+    if not url:
+        return None
+    try:
+        path  = urlparse(url).path.strip("/")
+        parts = [p for p in path.split("/") if p and not p.startswith("?")]
+        if parts:
+            return parts[0].lstrip("@")
+    except Exception:
+        pass
+    return None
+
+
+def _snowflake_to_date(uid):
+    """Convert a Twitter snowflake ID to a UTC datetime (account creation date)."""
+    TWITTER_EPOCH = 1288834974657  # Nov 4 2010
+    try:
+        ts_ms = (int(uid) >> 22) + TWITTER_EPOCH
+        return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+    except Exception:
+        return None
+
+
+def fetch_x_profile(handle):
+    """
+    Twitter syndication API — no auth required.
+    Powers the official Follow button; returns account metadata including ID.
+    ID is a snowflake from which we derive exact account creation date.
+    Returns None if account not found or API unavailable.
+    """
+    if not handle:
+        return None
+    clean = handle.lstrip("@").split("/")[0].split("?")[0]
+    data  = _get(
+        "https://cdn.syndication.twimg.com/widgets/followbutton/info.json",
+        params={"screen_names": clean},
+        timeout=10,
+    )
+    if data and isinstance(data, list) and len(data) > 0:
+        profile = data[0]
+        # Derive creation date from snowflake ID
+        uid = profile.get("id")
+        if uid:
+            created = _snowflake_to_date(uid)
+            if created:
+                profile["_created_utc"]  = created.isoformat()
+                profile["_account_days"] = (datetime.now(tz=timezone.utc) - created).days
+        return profile
+    # Empty list = account not found
+    if data is not None and isinstance(data, list) and len(data) == 0:
+        return {"_not_found": True, "_handle": clean}
+    return None
+
+
 def fetch_wayback_age(url):
     """Returns age in days of the oldest Wayback Machine snapshot for a URL."""
     try:
@@ -584,6 +639,69 @@ def score_rugcheck(rc):
     return min(100, score), flags
 
 
+def score_x(x_data):
+    """
+    Score the project's X/Twitter account legitimacy.
+    Uses account age (snowflake), follower count, and existence.
+    Returns (score 0-100, flags[]).
+    """
+    if x_data is None:
+        return 15, ["[X/🟡MED] X/Twitter profile could not be checked — API unavailable"]
+
+    flags, score = [], 0
+    def F(sev, msg): flags.append(f"[X/{sev}] {msg}")
+
+    handle = x_data.get("screen_name") or x_data.get("_handle", "unknown")
+
+    # Account not found
+    if x_data.get("_not_found"):
+        F("🔴HIGH", f"@{handle} — account not found on X/Twitter (deleted, suspended, or never existed)")
+        return 45, flags
+
+    age_days  = x_data.get("_account_days")
+    followers = x_data.get("followers_count", 0) or 0
+    verified  = x_data.get("verified", False) or x_data.get("is_blue_verified", False)
+    name      = x_data.get("name", handle)
+
+    # Account age
+    if age_days is not None:
+        if age_days < 7:
+            F("🚨CRITICAL", f"@{handle} created {age_days}d ago — brand new account, extreme risk")
+            score += 50
+        elif age_days < 30:
+            F("🔴HIGH", f"@{handle} created {age_days}d ago — very new account (<30d)")
+            score += 30
+        elif age_days < 90:
+            F("🟡MED", f"@{handle} created {age_days}d ago — relatively new account (<90d)")
+            score += 15
+        elif age_days < 365:
+            F("ℹ️ INFO", f"@{handle} — {age_days}d old ({age_days//30}mo)")
+        else:
+            F("✅INFO", f"@{handle} — established account {age_days//365}yr {(age_days%365)//30}mo old")
+
+    # Follower count
+    if followers == 0:
+        F("🔴HIGH", f"@{handle} — 0 followers (ghost account or just created)")
+        score += 25
+    elif followers < 100:
+        F("🔴HIGH", f"@{handle} — {followers:,} followers, extremely thin")
+        score += 20
+    elif followers < 1_000:
+        F("🟡MED", f"@{handle} — {followers:,} followers, low community size")
+        score += 10
+    elif followers < 10_000:
+        F("ℹ️ INFO", f"@{handle} — {followers:,} followers")
+    else:
+        F("✅INFO", f"@{handle} — {followers:,} followers, strong community")
+        score = max(0, score - 5)
+
+    if verified:
+        F("✅INFO", f"@{handle} — verified/blue-checked")
+        score = max(0, score - 5)
+
+    return min(100, score), flags
+
+
 # ── Scoring Engine ─────────────────────────────────────────────────────────────
 
 def final_score(rc, rl, re, rs, breaker):
@@ -702,10 +820,32 @@ def scan_token(address, chain="", no_coingecko=False, no_history=False):
     if not no_history:
         social_age_days, social_history_detail = check_social_history(dex, cg)
 
+    # Extract Twitter handle and fetch X profile
+    x_handle  = None
+    x_profile = None
+    if not no_history:
+        # Try DexScreener socials first
+        if dex and dex.get("top"):
+            for s in ((dex["top"].get("info") or {}).get("socials") or []):
+                if (s.get("type") or "").lower() in ("twitter", "x"):
+                    x_handle = _extract_twitter_handle(s.get("url", ""))
+                    break
+        # Fall back to CoinGecko
+        if not x_handle and cg:
+            x_handle = (cg.get("links") or {}).get("twitter_screen_name")
+        if x_handle:
+            x_profile = fetch_x_profile(x_handle)
+
     code_score, code_flags, breaker = score_code(gp)
     liq_score,  liq_flags           = score_liquidity(gp, dex)
     ent_score,  ent_flags           = score_entity(gp)
     soc_score,  soc_flags           = score_social(dex, cg, social_age_days)
+
+    # X score blends into social score (60% base social, 40% X check)
+    x_score, x_flags = score_x(x_profile) if not no_history else (0, [])
+    if not no_history:
+        soc_score = min(100, round(soc_score * 0.6 + x_score * 0.4))
+        soc_flags = soc_flags + x_flags
 
     rugcheck_flags = []
     if rc_data:
@@ -776,6 +916,17 @@ def scan_token(address, chain="", no_coingecko=False, no_history=False):
         metrics["social_history"] = {
             url: d for url, d in list(social_history_detail.items())[:5]
         }
+    if x_profile and not x_profile.get("_not_found"):
+        metrics["x_profile"] = {
+            "handle":      x_profile.get("screen_name", x_handle),
+            "name":        x_profile.get("name", ""),
+            "followers":   x_profile.get("followers_count", 0),
+            "verified":    x_profile.get("verified", False) or x_profile.get("is_blue_verified", False),
+            "account_days": x_profile.get("_account_days"),
+            "created_utc": x_profile.get("_created_utc"),
+        }
+    elif x_profile and x_profile.get("_not_found"):
+        metrics["x_profile"] = {"handle": x_handle or "", "not_found": True}
 
     return {
         "address": address, "chain": chain,
