@@ -4,13 +4,29 @@ Automated cryptocurrency scam detection engine. Input a token contract address �
 
 Designed for EVM chains (Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism) and Solana.
 
-> **Note:** This project has been in active development and private use since before this repository was created. The code published here represents the first public release as of **May 15, 2026**. Development is ongoing — the web dashboard (`validator_dashboard.py`) is live on port 5006. Planned additions include deeper social scraping pipelines and expanded chain support.
+---
+
+## Dashboard
+
+A Flask-based dashboard is included and runs on port 5006.
+
+### Home
+
+![Dashboard home](screenshots/dashboard_home.png)
+
+### Fraud Detection in Action
+
+The following scan is of **HoneyMoon (MOON)** — a BSC token with four HIGH-severity code flags: the owner can mint unlimited tokens, the sell tax is dynamically raisable to 100% (the honeypot mechanism), blacklisting allows the owner to freeze individual wallets, and a hidden privileged wallet is concealed from public audit.
+
+![Fraud example](screenshots/fraud_example.png)
+
+Code Risk scores **100/100** — the maximum. Overall risk score is **65/HIGH RISK**.
 
 ---
 
 ## How It Works
 
-The validator orchestrates four concurrent data pipelines and synthesizes their outputs into a single composite risk score. Each pipeline targets a distinct fraud vector documented in the academic and forensic literature on decentralized finance exploitation.
+The validator orchestrates four data pipelines and synthesizes their outputs into a single composite risk score. Each pipeline targets a distinct fraud vector documented in the academic and forensic literature on decentralized finance exploitation.
 
 ```
 Contract Address
@@ -49,8 +65,6 @@ Circuit breakers override the composite formula entirely:
 |---|---|
 | Confirmed honeypot (GoPlus `is_honeypot=1`) | Score → 100, **CONFIRMED SCAM** |
 | Sell tax ≥ 50% | Score → 100, **CONFIRMED SCAM** |
-| LP locked < 5% | Score → 100, **CONFIRMED SCAM** |
-| Single holder > 50% of supply | Score → 100, **CONFIRMED SCAM** |
 
 When no circuit breaker fires, the weighted model applies dynamically across four dimensions.
 
@@ -76,6 +90,7 @@ Evaluates the compiled bytecode and contract architecture for hardcoded maliciou
 
 - **Honeypot detection** — transfer restrictions that block non-whitelisted addresses from selling
 - **Infinite mint backdoors** — hidden functions allowing the deployer to generate unlimited supply
+- **Hidden owner** — obfuscated privileged wallet concealed from public audit tools
 - **Upgradeable proxy risk** — unrenounced proxy contracts that can silently swap to a malicious implementation
 - **Dynamic tax manipulation** — `sell_tax` variables modifiable by the owner at runtime (can be raised to 100%)
 - **Blacklisting capability** — `mapping(address => bool)` structures enabling selective account freezing
@@ -97,20 +112,23 @@ Monitors the health of the token's liquidity pool — the most critical infrastr
 
 Runs concentration analysis on the token's holder distribution to detect hidden insider control — a prerequisite for pump-and-dump execution:
 
-- **Gini Coefficient** — measures inequality across the known holder distribution. Scores above 0.85 indicate extreme centralization (threshold derived from meme-coin forensics literature). A Gini of 0 = perfect equality; 1.0 = single entity controls everything.
+- **Gini Coefficient** — measures inequality across the known holder distribution. Scores above 0.85 indicate extreme centralization. A Gini of 0 = perfect equality; 1.0 = single entity controls everything.
 - **Herfindahl-Hirschman Index (HHI)** — squares the market share of each entity, heavily penalizing top-heavy distributions. HHI > 2,500 is the regulatory threshold for monopolistic concentration. Applied directly to token supply.
 - **Top-holder concentration** — explicit flags when the top 1 holder exceeds 20%/50%, or when the top 5 combined exceed 80%
 - **Creator wallet tracking** — flags if the deploying address still holds a material percentage of supply
+- **Benford's Law analysis** — chi-square test on raw holder balances; significant deviation from Benford's expected distribution can indicate artificial balance construction
 
 ### 4. Social Risk (15% weight)
-**Source:** DexScreener profile metadata + CoinGecko community data.
+**Source:** DexScreener profile metadata + CoinGecko community data + Wayback Machine + RDAP + X/Twitter syndication API.
 
 Audits the off-chain social footprint for signs of synthetic community construction:
 
-- **Presence audit** — anonymous tokens with no verifiable Twitter/Telegram/website receive significant risk additions; social infrastructure is required for pump-and-dump execution
+- **Presence audit** — anonymous tokens with no verifiable Twitter/Telegram/website receive significant risk additions
+- **Social history verification** — Wayback Machine CDX API checks when social URLs first appeared; accounts created days before launch are a red flag
+- **Domain age** — RDAP registration data confirms how long the project website domain has existed
+- **X/Twitter account age** — snowflake ID decoding determines exact account creation date; accounts under 90 days old with low follower counts score poorly
 - **Follower count thresholds** — Twitter followers < 500 treated as a high-risk signal for newly spun-up bot farms
 - **Price/engagement anomaly** — price increases > 200% combined with buy-only 1h transaction pressure flag the classic pump-and-dump execution pattern
-- **Rapid decline detection** — price drops > 60% in 24h can indicate an exit scam in progress
 
 ---
 
@@ -134,6 +152,12 @@ python3 crypto_validator.py 0xADDRESS eth --json
 
 # Skip CoinGecko (avoid rate limits on batch runs)
 python3 crypto_validator.py 0xADDRESS eth --no-coingecko
+
+# Add to watchlist (monitored via cron + Telegram alerts)
+python3 crypto_validator.py 0xADDRESS eth --watch
+
+# Batch scan from file (one address per line)
+python3 crypto_validator.py 0xADDRESS eth --batch addresses.txt
 ```
 
 **Supported chains:** `eth` `bsc` `base` `polygon` `arbitrum` `avalanche` `optimism` `solana`
@@ -142,7 +166,7 @@ python3 crypto_validator.py 0xADDRESS eth --no-coingecko
 
 ```
 ════════════════════════════════════════════════════════════════
-   DEEP ROCK HOLDINGS — CRYPTO VALIDATOR
+   CRYPTO PROJECT VALIDATOR v2
 ════════════════════════════════════════════════════════════════
   Token:    Pepe (PEPE)
   Chain:    ETH
@@ -173,31 +197,31 @@ python3 crypto_validator.py 0xADDRESS eth --no-coingecko
 
 ## Web Dashboard
 
-A Flask-based dashboard is included (`validator_dashboard.py`) and runs as a systemd service on the host machine.
-
 ```bash
 python3 validator_dashboard.py
 # → http://localhost:5006
 ```
 
 Features:
-- Animated SVG risk score ring
+- Animated SVG risk score ring with color-coded verdict
 - Per-component bar breakdown (Code, Liquidity, Entity, Social)
 - Full metrics panel (honeypot status, LP lock %, Gini, HHI)
 - Circuit breaker labels and verdict badges
-- 60-second timeout with progress indicator
-
-The service is pre-configured to restart automatically on failure.
+- Scan history tab with rescan links
+- Watchlist tab with Telegram alert integration
+- Batch scan tab for CSV-style multi-address runs
+- X/Twitter profile card with account age and follower count
 
 ---
 
 ## Requirements
 
 ```
-requests
+requests>=2.31.0
+flask>=3.0.0
 ```
 
-No API keys required. GoPlus and DexScreener are free and permissionless. CoinGecko operates on the free public tier (rate-limited to ~50 req/min).
+No API keys required. GoPlus, DexScreener, Wayback Machine, RDAP, and the X/Twitter syndication endpoint are all free and permissionless. CoinGecko operates on the free public tier (rate-limited to ~50 req/min).
 
 ---
 
@@ -208,12 +232,16 @@ No API keys required. GoPlus and DexScreener are free and permissionless. CoinGe
 | [GoPlus Security](https://gopluslabs.io) | Contract bytecode analysis, holder distribution, LP lock status | Free |
 | [DexScreener](https://dexscreener.com) | Liquidity depth, volume, price, social links | Free |
 | [CoinGecko](https://coingecko.com) | Community size, social metadata | Free tier |
+| [Rugcheck.xyz](https://rugcheck.xyz) | Solana token risk analysis | Free |
+| [Wayback Machine CDX](https://archive.org) | Social URL first-seen date | Free |
+| [RDAP](https://rdap.org) | Domain registration age | Free |
+| X/Twitter syndication | Account metadata, snowflake ID → creation date | Free (no key) |
 
 ---
 
 ## Limitations
 
-- **Holder concentration analysis uses GoPlus top-10 data only** — Gini and HHI are computed from the top 10 holders, not the full distribution. These metrics represent an upper-bound estimate of concentration risk; actual values across all holders will typically be lower (more distributed).
-- **LP lock detection relies on GoPlus tagging** — LP tokens burned to a dead address (e.g., `0x000...dead`) are not tagged as `is_locked` and may produce false positives on the lock flag. High TVL and holder count partially mitigate this signal.
+- **Holder concentration analysis uses GoPlus top-10 data only** — Gini and HHI are computed from the top 10 holders, not the full distribution. These metrics represent an upper-bound estimate of concentration risk.
+- **LP lock detection relies on GoPlus tagging** — LP tokens burned to a dead address (e.g., `0x000...dead`) are not tagged as `is_locked` and may produce false positives on the lock flag.
 - **Social pipeline is metadata-only** — full bot detection (account age analysis, reply swarm NLP, follower graph clustering) requires a headless browser scraping layer not included in this version.
 - **No mempool monitoring** — pre-launch honeypot setups detectable only via symbolic execution of bytecode are flagged through GoPlus rather than custom decompilation.

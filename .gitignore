@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+scan_history.json
+watchlist.json
+*.log
+
+# Testing/helper scripts not part of public release
+find_scam.py
+find_live_scam.py
+probe_scores.py
+probe_scores2.py
+inspect_floki.py
+inspect_honeymoon.py
+take_screenshots.py
+restart_validator.sh

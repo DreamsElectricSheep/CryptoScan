@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-validator_dashboard.py — Crypto Scam Validator Web Dashboard v2
-Deep Rock Holdings | Port 5006
-
-Tabs: Scan | History | Watchlist | Batch
+validator_dashboard.py — Crypto Project Validator Web Dashboard v2
+Port 5006 | Tabs: Scan | History | Watchlist | Batch
 """
 
 import sys
@@ -30,7 +28,7 @@ PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Crypto Validator — Deep Rock</title>
+<title>Crypto Project Validator</title>
 <style>
 :root {
   --bg:      #080b0f;
@@ -277,8 +275,8 @@ body {
 <body>
 
 <div class="header">
-  <h1>Deep Rock Holdings &mdash; Crypto Validator</h1>
-  <p>Contract security &middot; liquidity &middot; entity concentration &middot; social history</p>
+  <h1>Crypto Project Validator</h1>
+  <p>Contract security &middot; liquidity &middot; entity concentration &middot; social &amp; X history</p>
 </div>
 
 <!-- Tab bar -->

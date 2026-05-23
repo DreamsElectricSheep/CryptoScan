@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-crypto_validator.py — Cryptocurrency Scam Detection Engine v2
-Deep Rock Holdings
+crypto_validator.py — Cryptocurrency Project Scam Detection Engine v2
 
 Usage:
     python3 crypto_validator.py <address> [chain] [--telegram] [--json] [--watch]
@@ -315,6 +314,9 @@ def score_code(gp):
     if str(gp.get("is_mintable", "0")) == "1" and not renounced:
         F("🔴HIGH", "Mintable supply + ownership NOT renounced — infinite mint risk")
         score += 40
+    if str(gp.get("hidden_owner", "0")) == "1":
+        F("🔴HIGH", "Hidden owner detected — privileged wallet concealed from public audit")
+        score += 35
     if str(gp.get("is_proxy", "0")) == "1" and str(gp.get("can_take_back_ownership", "0")) == "1":
         F("🔴HIGH", "Upgradeable proxy + ownership active — silent backdoor upgrade risk")
         score += 35
@@ -963,7 +965,7 @@ def format_report(result):
 
     L = []
     L.append("=" * 64)
-    L.append("   DEEP ROCK HOLDINGS — CRYPTO VALIDATOR v2")
+    L.append("       CRYPTO PROJECT VALIDATOR v2")
     L.append("=" * 64)
     L.append(f"  Token:    {result['name']} ({result['symbol']})")
     L.append(f"  Chain:    {chain.upper()}")
@@ -1092,7 +1094,7 @@ def build_tg_message(result):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    p = argparse.ArgumentParser(description="Crypto Scam Detector v2 — Deep Rock Holdings")
+    p = argparse.ArgumentParser(description="Crypto Project Validator v2")
     p.add_argument("address", nargs="?",  help="Token contract address")
     p.add_argument("chain",   nargs="?",  default=None,
                    help="Chain: eth|bsc|base|polygon|arbitrum|avalanche|optimism|solana")
