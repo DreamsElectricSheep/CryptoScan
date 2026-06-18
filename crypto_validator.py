@@ -281,7 +281,7 @@ def benford_chi2(values):
         if s and s[0].isdigit() and s[0] != "0":
             digits.append(int(s[0]))
     n = len(digits)
-    if n < 50:
+    if n < 10:
         return None, False
     counts = Counter(digits)
     chi2 = sum(
@@ -498,7 +498,7 @@ def score_entity(gp):
             else:
                 F("ℹ️ INFO", f"Benford test: chi2={chi2} — holder distribution looks natural")
         else:
-            F("ℹ️ INFO", f"Benford test: insufficient data ({len(raw_balances)} samples, need 50+)")
+            F("ℹ️ INFO", f"Benford test: insufficient data ({len(raw_balances)} samples, need 10+)")
 
     for h in sorted(holders, key=lambda x: float(x.get("percent", 0) or 0), reverse=True)[:5]:
         raw  = float(h.get("percent", 0) or 0)
@@ -648,7 +648,7 @@ def score_x(x_data):
     Returns (score 0-100, flags[]).
     """
     if x_data is None:
-        return 15, ["[X/🟡MED] X/Twitter profile could not be checked — API unavailable"]
+        return 0, []
 
     flags, score = [], 0
     def F(sev, msg): flags.append(f"[X/{sev}] {msg}")
@@ -881,6 +881,7 @@ def scan_token(address, chain="", no_coingecko=False, no_history=False):
     holder_count = int((gp or {}).get("holder_count", 0) or 0)
 
     metrics = {
+        "has_gp":        gp is not None,
         "honeypot":      str((gp or {}).get("is_honeypot",   "0")) == "1",
         "mintable":      str((gp or {}).get("is_mintable",   "0")) == "1",
         "verified":      str((gp or {}).get("is_open_source","0")) == "1",
@@ -1012,10 +1013,8 @@ def format_report(result):
 
     L.append("-" * 64)
     L.append("  METRICS:")
-    gp = result.get("_raw", {}).get("gp") or {}
-    if gp:
-        owner     = (gp.get("owner_address") or "").lower()
-        renounced = owner in ("0x0000000000000000000000000000000000000000", "")
+    if metrics.get("has_gp"):
+        renounced = metrics["renounced"]
         L.append(f"  {'Buy Tax:':<22} {metrics['buy_tax']:.1f}%")
         L.append(f"  {'Sell Tax:':<22} {metrics['sell_tax']:.1f}%")
         L.append(f"  {'Honeypot:':<22} {'YES' if metrics['honeypot']  else 'No'}")
