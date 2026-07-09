@@ -6,6 +6,19 @@ Designed for EVM chains (Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Opti
 
 ---
 
+## Why this exists — the risk it addresses
+
+Retail crypto investors routinely make buy decisions off a handful of positive signals — a locked liquidity pool, an active Twitter account, a large holder count — without checking whether any of those signals were manufactured. This tool replaces that gut-check with a reproducible, four-dimensional read across code, liquidity, holder concentration, and social presence, so a decision has to survive contact with actual contract bytecode and on-chain data, not just vibes.
+
+## Safety, autonomy & ethical design
+
+- **Deterministic, auditable scoring — no LLM judgment call in the loop.** Every score is a fixed formula over structured data from free, permissionless APIs. Anyone can recompute a result by hand from the same inputs; nothing here is a black-box opinion.
+- **Circuit breakers exist because linear scoring fails exactly when it matters most.** A token with deep liquidity and a large, active community can still be a 100%-loss honeypot — see the Boolean Circuit Breaker section below for why a single deterministic fraud signature is designed to override every other positive input, rather than being averaged away by them.
+- **Autonomy boundary: this tool scores and reports, it never acts.** It doesn't trade, doesn't hold funds, and doesn't execute anything against the tokens it evaluates — the output is a number and a breakdown for a human to weigh, full stop.
+- **Ethical/responsible-use notes:** every data source is free and permissionless (no scraping behind a paywall or authentication wall, no ToS-violating access); the tool is explicitly a due-diligence aid, not investment advice, and it can produce false negatives (see Limitations below) — a low score is evidence of absence of certain red flags, not proof of legitimacy. It should never be the only check before risking real capital.
+
+---
+
 ## Dashboard
 
 A Flask-based dashboard is included and runs on port 5006.
