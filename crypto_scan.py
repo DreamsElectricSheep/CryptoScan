@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-crypto_validator.py — Cryptocurrency Project Scam Detection Engine v2
+crypto_scan.py — Crypto Scan: cryptocurrency token scam-detection engine v2.1
 
 Usage:
-    python3 crypto_validator.py <address> [chain] [--telegram] [--json] [--watch]
-    python3 crypto_validator.py --batch addresses.txt
-    python3 crypto_validator.py --watchlist
+    python3 crypto_scan.py <address> [chain] [--telegram] [--json] [--watch]
+    python3 crypto_scan.py --batch addresses.txt
+    python3 crypto_scan.py --watchlist
 
 Chains: eth, bsc, base, polygon, arbitrum, avalanche, optimism, solana
 """
@@ -15,6 +15,8 @@ import os
 import json
 import time
 import argparse
+import fcntl
+import threading
 import requests
 from datetime import datetime, timezone
 from collections import Counter
@@ -60,15 +62,84 @@ SOCIAL_AGE_NEW     = 30
 SOCIAL_AGE_VERY_NEW = 7
 
 
+# ── Source health ──────────────────────────────────────────────────────────────
+# Every upstream here is free and keyless, so any of them can start refusing
+# traffic without warning (Reddit killed its free JSON endpoints in June 2026 and
+# the fund's sentiment scanner kept "working" on empty data for days). _get()
+# swallowed every failure and returned None, so a scan whose sources were half
+# dead still produced a confident-looking score. Now each request is recorded and
+# the scan reports which sources it actually got answers from.
+
+_SOURCE_OF = (
+    ("gopluslabs.io",   "GoPlus"),
+    ("dexscreener.com", "DexScreener"),
+    ("coingecko.com",   "CoinGecko"),
+    ("rugcheck.xyz",    "RugCheck"),
+    ("web.archive.org", "Wayback"),
+    ("rdap.org",        "RDAP"),
+    ("twimg.com",       "X/Twitter"),
+)
+# Without this one, there is no contract-security data at all and the code pillar
+# (35% of the composite, and the only source of the circuit breaker) is guesswork.
+PRIMARY_SOURCE = "GoPlus"
+
+# Only these two change what the score MEANS. The rest are enrichment: nice to have,
+# routinely flaky, and not worth a warning. Wayback in particular rate-limits or times
+# out on a large share of otherwise-perfect scans — banner every one of those and the
+# warning becomes wallpaper, which is how alert noise defeats real alerts.
+CRITICAL_SOURCES = {"GoPlus", "DexScreener"}
+
+_health = threading.local()
+
+
+def _source_name(url):
+    for frag, name in _SOURCE_OF:
+        if frag in url:
+            return name
+    return None
+
+
+def begin_scan_health():
+    """Reset per-scan source tracking. Thread-local: the dashboard scans in threads."""
+    _health.sources = {}
+
+
+def mark_source(name, ok, detail=""):
+    d = getattr(_health, "sources", None)
+    if d is None or not name:
+        return
+    if d.get(name, {}).get("ok"):
+        return                      # one success is enough; don't let a later miss undo it
+    d[name] = {"ok": bool(ok), "detail": detail}
+
+
+def scan_health():
+    d = getattr(_health, "sources", None) or {}
+    failed          = sorted(n for n, v in d.items() if not v["ok"])
+    critical_failed = sorted(n for n in failed if n in CRITICAL_SOURCES)
+    return {
+        "attempted":       sorted(d),
+        "failed":          failed,            # everything that missed, for the record
+        "critical_failed": critical_failed,   # only these justify a warning
+        "degraded":        bool(critical_failed),
+        "primary_ok":      d.get(PRIMARY_SOURCE, {}).get("ok", False),
+        "detail":          {n: v.get("detail", "") for n, v in d.items() if not v["ok"]},
+    }
+
+
 # ── API Layer ──────────────────────────────────────────────────────────────────
 
 def _get(url, params=None, timeout=12):
+    name = _source_name(url)
     try:
         r = requests.get(url, params=params, timeout=timeout,
-                         headers={"User-Agent": "DeepRock-Validator/2.0"})
+                         headers={"User-Agent": "CryptoScan/2.1"})
         r.raise_for_status()
-        return r.json()
-    except Exception:
+        data = r.json()
+        mark_source(name, True)
+        return data
+    except Exception as e:
+        mark_source(name, False, f"{type(e).__name__}: {str(e)[:120]}")
         return None
 
 
@@ -78,7 +149,13 @@ def fetch_goplus(address, chain_id):
     else:
         url = f"https://api.gopluslabs.io/api/v1/token_security/{chain_id}"
     data = _get(url, params={"contract_addresses": address})
-    if not data or data.get("code") != 1:
+    if not data:
+        return None
+    if data.get("code") != 1:
+        # HTTP 200 but a logical refusal (rate limit, unsupported chain, bad address).
+        # _get() already recorded a success, so correct it — otherwise the scan looks
+        # fully sourced while the most important pillar has no data behind it.
+        mark_source("GoPlus", False, f"API code={data.get('code')} {str(data.get('message'))[:80]}")
         return None
     result = data.get("result", {}) or {}
     return result.get(address.lower()) or result.get(address) or (list(result.values())[0] if result else None)
@@ -725,6 +802,32 @@ def bar(score, w=10):
 
 # ── History & Watchlist ────────────────────────────────────────────────────────
 
+class _FileLock:
+    """flock around a read-modify-write JSON file.
+
+    Both history and watchlist were plain read-then-overwrite, so two concurrent
+    scans (or a scan racing the watchlist monitor) could silently drop one side's
+    write. Cheap to fix, and the monitor cron makes concurrency real.
+    """
+
+    def __init__(self, path):
+        self.lockpath = path + ".lock"
+        self.fh = None
+
+    def __enter__(self):
+        self.fh = open(self.lockpath, "w")
+        fcntl.flock(self.fh, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            fcntl.flock(self.fh, fcntl.LOCK_UN)
+            self.fh.close()
+        except Exception:
+            pass
+        return False
+
+
 class ScanHistory:
     MAX = 100
 
@@ -733,15 +836,18 @@ class ScanHistory:
 
     def save(self, address, chain, score, verdict, name, symbol):
         try:
-            history = self.load(limit=self.MAX)
-            history = [h for h in history if h.get("address") != address]
-            history.insert(0, {
-                "address": address, "chain": chain, "score": score,
-                "verdict": verdict, "name": name, "symbol": symbol,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
-            with open(self.path, "w") as f:
-                json.dump(history[:self.MAX], f)
+            with _FileLock(self.path):
+                history = self.load(limit=self.MAX)
+                history = [h for h in history if h.get("address") != address]
+                history.insert(0, {
+                    "address": address, "chain": chain, "score": score,
+                    "verdict": verdict, "name": name, "symbol": symbol,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+                tmp = self.path + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(history[:self.MAX], f)
+                os.replace(tmp, self.path)     # atomic; never leaves a truncated file
         except Exception:
             pass
 
@@ -766,8 +872,11 @@ class Watchlist:
 
     def _save(self, data):
         try:
-            with open(self.path, "w") as f:
-                json.dump(data, f, indent=2)
+            with _FileLock(self.path):
+                tmp = self.path + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp, self.path)
         except Exception:
             pass
 
@@ -801,6 +910,7 @@ class Watchlist:
 def scan_token(address, chain="", no_coingecko=False, no_history=False):
     """Full token scan. Returns result dict. Used by both CLI and dashboard."""
     address = address.strip()
+    begin_scan_health()
 
     dex = fetch_dexscreener(address)
     if not chain and dex and dex.get("top"):
@@ -856,6 +966,20 @@ def scan_token(address, chain="", no_coingecko=False, no_history=False):
 
     all_flags     = code_flags + rugcheck_flags + liq_flags + ent_flags + soc_flags
     fs, verdict   = final_score(code_score, liq_score, ent_score, soc_score, breaker)
+
+    health = scan_health()
+    if health["degraded"]:
+        all_flags = all_flags + [
+            f"⚠️ DEGRADED SCAN — no answer from: {', '.join(health['critical_failed'])}"
+        ]
+    # A confirmed breaker is still trustworthy (it fired on data we DID get), but a
+    # clean-looking grade computed without contract security data is not a grade.
+    if not health["primary_ok"] and not breaker:
+        verdict = "INCONCLUSIVE — no contract data"
+        all_flags = all_flags + [
+            "⚠️ GoPlus returned nothing: honeypot / mint / tax / owner checks did not run. "
+            "Treat the score below as unsourced."
+        ]
 
     name = symbol = "UNKNOWN"
     if dex and dex.get("top"):
@@ -942,6 +1066,7 @@ def scan_token(address, chain="", no_coingecko=False, no_history=False):
         },
         "flags": all_flags,
         "metrics": metrics,
+        "health": health,
         "timestamp": datetime.utcnow().isoformat(),
         "_raw": {"gp": gp, "dex": dex, "cg": cg},
     }
@@ -966,7 +1091,7 @@ def format_report(result):
 
     L = []
     L.append("=" * 64)
-    L.append("       CRYPTO PROJECT VALIDATOR v2")
+    L.append("              CRYPTO SCAN v2.1")
     L.append("=" * 64)
     L.append(f"  Token:    {result['name']} ({result['symbol']})")
     L.append(f"  Chain:    {chain.upper()}")
@@ -1076,7 +1201,7 @@ def build_tg_message(result):
     flags   = result["flags"]
     icon    = "!!" if fs >= 80 else "!!" if fs >= 60 else "??" if fs >= 40 else "OK"
     msg = (
-        f"{icon} <b>CRYPTO VALIDATOR</b>\n"
+        f"{icon} <b>CRYPTO SCAN</b>\n"
         f"Chain: {result['chain'].upper()} | Score: <b>{fs}/100</b>\n"
         f"Verdict: <b>{verdict}</b>\n\n"
         f"Code: {scores['code']}/100  Liquidity: {scores['liquidity']}/100\n"
@@ -1093,7 +1218,7 @@ def build_tg_message(result):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    p = argparse.ArgumentParser(description="Crypto Project Validator v2")
+    p = argparse.ArgumentParser(description="Crypto Scan v2.1 — token scam detection")
     p.add_argument("address", nargs="?",  help="Token contract address")
     p.add_argument("chain",   nargs="?",  default=None,
                    help="Chain: eth|bsc|base|polygon|arbitrum|avalanche|optimism|solana")
@@ -1192,7 +1317,7 @@ def main():
         print(f"  Added to watchlist: {result['name']} (alert threshold: 15pt change)")
 
     if args.json:
-        outfile = f"validator_{result['address'][:10]}_{int(time.time())}.json"
+        outfile = f"cryptoscan_{result['address'][:10]}_{int(time.time())}.json"
         out = {k: v for k, v in result.items() if k != "_raw"}
         with open(outfile, "w") as f:
             json.dump(out, f, indent=2)

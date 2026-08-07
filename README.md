@@ -149,28 +149,28 @@ Audits the off-chain social footprint for signs of synthetic community construct
 
 ```bash
 # Auto-detect chain from DexScreener
-python3 crypto_validator.py 0x6982508145454Ce325dDbE47a25d4ec3d2311933
+python3 crypto_scan.py 0x6982508145454Ce325dDbE47a25d4ec3d2311933
 
 # Specify chain explicitly
-python3 crypto_validator.py 0x6982508145454Ce325dDbE47a25d4ec3d2311933 eth
+python3 crypto_scan.py 0x6982508145454Ce325dDbE47a25d4ec3d2311933 eth
 
 # Solana token
-python3 crypto_validator.py EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v solana
+python3 crypto_scan.py EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v solana
 
 # Send result via Telegram
-python3 crypto_validator.py 0xADDRESS eth --telegram
+python3 crypto_scan.py 0xADDRESS eth --telegram
 
 # Write JSON output
-python3 crypto_validator.py 0xADDRESS eth --json
+python3 crypto_scan.py 0xADDRESS eth --json
 
 # Skip CoinGecko (avoid rate limits on batch runs)
-python3 crypto_validator.py 0xADDRESS eth --no-coingecko
+python3 crypto_scan.py 0xADDRESS eth --no-coingecko
 
 # Add to watchlist (monitored via cron + Telegram alerts)
-python3 crypto_validator.py 0xADDRESS eth --watch
+python3 crypto_scan.py 0xADDRESS eth --watch
 
 # Batch scan from file (one address per line)
-python3 crypto_validator.py 0xADDRESS eth --batch addresses.txt
+python3 crypto_scan.py 0xADDRESS eth --batch addresses.txt
 ```
 
 **Supported chains:** `eth` `bsc` `base` `polygon` `arbitrum` `avalanche` `optimism` `solana`
@@ -211,7 +211,7 @@ python3 crypto_validator.py 0xADDRESS eth --batch addresses.txt
 ## Web Dashboard
 
 ```bash
-python3 validator_dashboard.py
+python3 crypto_scan_dashboard.py
 # → http://localhost:5006
 ```
 
@@ -258,3 +258,51 @@ No API keys required. GoPlus, DexScreener, Wayback Machine, RDAP, and the X/Twit
 - **LP lock detection relies on GoPlus tagging** — LP tokens burned to a dead address (e.g., `0x000...dead`) are not tagged as `is_locked` and may produce false positives on the lock flag.
 - **Social pipeline is metadata-only** — full bot detection (account age analysis, reply swarm NLP, follower graph clustering) requires a headless browser scraping layer not included in this version.
 - **No mempool monitoring** — pre-launch honeypot setups detectable only via symbolic execution of bytecode are flagged through GoPlus rather than custom decompilation.
+
+---
+
+## Watchlist monitoring
+
+Adding a token to the watchlist stores a `threshold` (default 15 points). A cron
+job re-scans every watchlisted token and sends a Telegram alert when:
+
+- **risk rises** by at least that token's threshold (`45 → 63` on a 15 threshold fires)
+- **a circuit breaker trips** — confirmed scam, alerted regardless of delta
+- **the scan degrades** — the contract-security source stops answering, so the token
+  can no longer be scored. Silence there would read as "nothing changed", which is
+  exactly wrong.
+
+```bash
+# every 6 hours
+0 */6 * * * /path/to/venv/bin/python3 /home/hedgefund/CryptoScan/watchlist_monitor.py
+
+# preview without sending or persisting
+./watchlist_monitor.py --dry-run
+
+# report every token, not just threshold crossings
+./watchlist_monitor.py --force
+```
+
+## Source health
+
+All seven upstreams (GoPlus, DexScreener, CoinGecko, RugCheck, Wayback, RDAP,
+X syndication) are free and keyless, so any of them can start refusing traffic
+without notice. Every scan result carries a `health` block recording which
+sources answered. Only GoPlus and DexScreener are treated as critical — the rest are
+enrichment, and Wayback in particular times out often enough that warning on it would
+turn the banner into wallpaper:
+
+```json
+"health": {
+  "attempted": ["DexScreener", "GoPlus", "Wayback"],
+  "failed": ["GoPlus", "Wayback"],
+  "critical_failed": ["GoPlus"],
+  "degraded": true,
+  "primary_ok": false
+}
+```
+
+When GoPlus returns nothing, the honeypot / mint / tax / owner checks never run,
+so the verdict becomes `INCONCLUSIVE — no contract data` rather than a risk grade,
+and the dashboard shows an unsourced-scan banner. A scan built on missing data is
+not a clean bill of health, and it should never look like one.

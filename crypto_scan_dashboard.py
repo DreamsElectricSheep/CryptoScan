@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-validator_dashboard.py — Crypto Project Validator Web Dashboard v2
+crypto_scan_dashboard.py — Crypto Scan Web Dashboard v2.1
 Port 5006 | Tabs: Scan | History | Watchlist | Batch
 """
 
@@ -12,7 +12,7 @@ from datetime import datetime
 sys.path.insert(0, '/home/hedgefund/.openclaw/workspace/scripts')
 
 from flask import Flask, request, jsonify
-from crypto_validator import (
+from crypto_scan import (
     scan_token, ScanHistory, Watchlist,
     DS_TO_GOPLUS, gini_coefficient, hhi_score,
     GINI_EXTREME, GINI_HIGH, HHI_HIGH, HHI_MEDIUM, LP_LOCK_SAFE,
@@ -28,7 +28,7 @@ PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Crypto Project Validator</title>
+<title>Crypto Scan</title>
 <style>
 :root {
   --bg:      #080b0f;
@@ -275,7 +275,7 @@ body {
 <body>
 
 <div class="header">
-  <h1>Crypto Project Validator</h1>
+  <h1>Crypto Scan</h1>
   <p>Contract security &middot; liquidity &middot; entity concentration &middot; social &amp; X history</p>
 </div>
 
@@ -332,6 +332,9 @@ body {
         </div>
       </div>
       <div class="score-info">
+        <div id="degraded-banner" style="display:none;background:#4a2318;border:1px solid #b45309;
+             color:#fbbf24;padding:8px 12px;border-radius:8px;margin-bottom:10px;font-size:13px;
+             line-height:1.45"></div>
         <div class="verdict-pill" id="vpill">&mdash;</div>
         <div class="tkn-name" id="tname">&mdash;</div>
         <div class="tkn-meta" id="tmeta">&mdash;</div>
@@ -671,6 +674,23 @@ function showResults(d) {
   pill.style.background = vs.bg;
   pill.style.color = vs.c;
 
+  // Every upstream is free and keyless, so any of them can go dark without notice.
+  // Say so on the result rather than letting a half-sourced scan look authoritative.
+  const banner = document.getElementById('degraded-banner');
+  const h = d.health || {};
+  if (h.degraded) {
+    const failed = (h.critical_failed || h.failed || []).join(', ');
+    banner.innerHTML = (h.primary_ok === false)
+      ? '<b>&#9888; Unsourced scan.</b> GoPlus returned no contract data, so the honeypot, '
+        + 'mint, tax and owner checks did not run. The score below is not a risk grade. '
+        + '<br><span style="opacity:.8">No answer from: ' + failed + '</span>'
+      : '<b>&#9888; Degraded scan.</b> Some sources did not answer, so this score is based on '
+        + 'less evidence than usual.<br><span style="opacity:.8">No answer from: ' + failed + '</span>';
+    banner.style.display = 'block';
+  } else {
+    banner.style.display = 'none';
+  }
+
   document.getElementById('tname').textContent = d.name + ' (' + d.symbol + ')';
   document.getElementById('tmeta').textContent =
     d.chain.toUpperCase() + ' · ' + (d.metrics.dex||'') + ' · ' + fmtAddr(d.address);
@@ -947,10 +967,17 @@ def validate():
         return jsonify({'error': 'Address is required'}), 400
 
     result_q = queue.Queue()
+    # Set when the request gives up. The worker is a daemon thread we cannot kill,
+    # so it checks this before writing: otherwise a scan that timed out at 90s still
+    # lands in history minutes later, and the user sees a 504 followed by a phantom
+    # entry they never asked for.
+    abandoned = threading.Event()
 
     def run():
         try:
             result = scan_token(address, chain, no_coingecko=no_cg, no_history=no_history)
+            if abandoned.is_set():
+                return
             _hist.save(
                 result['address'], result['chain'], result['final_score'],
                 result['verdict'], result['name'], result['symbol'],
@@ -958,16 +985,21 @@ def validate():
             out = {k: v for k, v in result.items() if k != '_raw'}
             result_q.put(out)
         except Exception as e:
-            result_q.put({'error': str(e)})
+            if not abandoned.is_set():
+                result_q.put({'error': str(e)})
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
     t.join(timeout=90)
 
     if t.is_alive():
+        abandoned.set()
         return jsonify({'error': 'Analysis timed out after 90s'}), 504
 
-    result = result_q.get()
+    try:
+        result = result_q.get_nowait()
+    except queue.Empty:
+        return jsonify({'error': 'Scan finished without returning a result'}), 500
     if 'error' in result:
         return jsonify(result), 500
     return jsonify(result)

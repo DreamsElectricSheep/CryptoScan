@@ -14,3 +14,7 @@ inspect_floki.py
 inspect_honeymoon.py
 take_screenshots.py
 restart_validator.sh
+
+# flock sidecars for the JSON stores
+*.lock
+cryptoscan_0x*.json
