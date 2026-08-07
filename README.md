@@ -1,4 +1,4 @@
-![CryptoScan](https://opengraph.githubassets.com/1/DreamsElectricSheep/CryptoScan)
+![CryptoScan](social_preview.png)
 
 # CryptoScan
 
