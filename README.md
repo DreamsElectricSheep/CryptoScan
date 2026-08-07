@@ -1,3 +1,5 @@
+![CryptoScan](https://opengraph.githubassets.com/1/DreamsElectricSheep/CryptoScan)
+
 # CryptoScan
 
 Automated cryptocurrency scam detection engine. Input a token contract address — get back a quantified risk score built from four independent analysis pipelines: smart contract security, liquidity pool integrity, on-chain entity concentration, and social presence auditing.
