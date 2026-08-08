@@ -52,6 +52,26 @@ W_SOCIAL    = 0.15
 
 GINI_EXTREME       = 0.85
 GINI_HIGH          = 0.70
+
+# ── Wallet-splitting detection ────────────────────────────────────────────────
+# GoPlus returns only the TOP 10 holders (verified: USDC reports holder_count
+# 8,420,569 and len(holders) == 10). Every concentration statistic here is
+# therefore computed on a 10-row slice, not the real distribution.
+#
+# That created an exploitable hole: one entity holding 90% through a single
+# wallet scored 100/100 on this pillar, while the SAME 90% split evenly across
+# ten wallets scored 12/100 with zero flags — because ten equal holders give a
+# Gini of 0.000, which reads as "perfectly equal". Splitting a treasury across
+# ten addresses is the cheapest evasion there is.
+#
+# Natural holder distributions are power-law: top1 >> top2 >> top3. Near-uniform
+# top holders are a fingerprint, not a coincidence. So a LARGE aggregate stake
+# that is SUSPICIOUSLY EVEN is now itself the signal.
+SPLIT_MIN_TOP10    = 0.50   # aggregate stake that makes uniformity meaningful
+SPLIT_GINI_STRONG  = 0.15   # near-identical balances — strong signature
+SPLIT_GINI_WEAK    = 0.30   # unusually flat for a real distribution
+TOP10_EXTREME      = 0.80   # top 10 own this much regardless of shape
+TOP10_HIGH         = 0.60
 HHI_HIGH           = 2500
 HHI_MEDIUM         = 1500
 SELL_TAX_SAFE      = 0.10
@@ -342,23 +362,47 @@ def gini_coefficient(shares):
     if total <= 0:
         return 0.0
     weighted = sum((i + 1) * v for i, v in enumerate(s))
-    return (2 * weighted) / (n * total) - (n + 1) / n
+    g = (2 * weighted) / (n * total) - (n + 1) / n
+    # Perfectly equal inputs land on a tiny negative from float error, which
+    # renders as "-0.000" in flag text. Gini is defined on [0, 1].
+    return min(1.0, max(0.0, g))
 
 
 def hhi_score(shares_pct):
     return sum(p ** 2 for p in shares_pct)
 
 
+# Chi-square with df=8 needs a healthy expected count in every bin. The rarest
+# leading digit (9) is expected 4.6% of the time, so n=10 gives it an expected
+# count of 0.46 and the statistic is meaningless. 50 is the conventional working
+# floor and is what this function's docstring always claimed; the code gated at
+# 10, which is where it was actually running. See the BENFORD note in
+# score_entity for why that gap mattered in practice.
+BENFORD_MIN_SAMPLES = 50
+
+
 def benford_chi2(values):
-    """Chi-square Benford test on a list of values. Returns (chi2, is_suspicious). Needs >=50 samples."""
+    """Chi-square Benford test. Returns (chi2, is_suspicious), or (None, False)
+    when the sample is too small for the statistic to support a verdict.
+
+    Benford's law is scale-invariant: 0.0234 and 234.0 share the leading
+    significant digit 2 and must be counted identically.
+    """
     EXPECTED = [0.301, 0.176, 0.125, 0.097, 0.079, 0.067, 0.058, 0.051, 0.046]
     digits = []
     for v in values:
-        s = str(abs(v)).lstrip("0").replace(".", "")
-        if s and s[0].isdigit() and s[0] != "0":
-            digits.append(int(s[0]))
+        # Strip the decimal point FIRST, then leading zeros. The other order
+        # ('0.0234' -> lstrip('0') -> '.0234' -> replace -> '0234') leaves a
+        # leading '0' and silently discarded every value below 0.1 — for token
+        # balances that meant dropping the small holders before the test ran.
+        try:
+            t = str(abs(float(v))).replace(".", "").lstrip("0")
+        except (TypeError, ValueError):
+            continue
+        if t and t[0].isdigit():
+            digits.append(int(t[0]))
     n = len(digits)
-    if n < 10:
+    if n < BENFORD_MIN_SAMPLES:
         return None, False
     counts = Counter(digits)
     chi2 = sum(
@@ -528,17 +572,20 @@ def score_entity(gp):
     if top1 > 0.50:
         F("🚨CRITICAL", f"Top holder controls {top1*100:.1f}% of supply — majority control")
         score += 55
+    # NOTE: gini/hhi below describe the TOP-10 SLICE only (all GoPlus returns),
+    # not the token's full holder distribution. Labelled as such so they are not
+    # read as distribution-wide centralization measures.
     if gini > GINI_EXTREME:
-        F("🔴HIGH", f"Gini {gini:.3f} — extreme centralization (threshold: {GINI_EXTREME})")
+        F("🔴HIGH", f"Gini {gini:.3f} across the top 10 — one holder dominates the group")
         score += 30
     elif gini > GINI_HIGH:
-        F("🟡MED", f"Gini {gini:.3f} — elevated centralization")
+        F("🟡MED", f"Gini {gini:.3f} across the top 10 — uneven within the top group")
         score += 15
     if hhi > HHI_HIGH:
-        F("🔴HIGH", f"HHI {hhi:,.0f} — highly concentrated monopolistic distribution (>2500=extreme)")
+        F("🔴HIGH", f"HHI {hhi:,.0f} (top 10) — highly concentrated (>2500=extreme)")
         score += 25
     elif hhi > HHI_MEDIUM:
-        F("🟡MED", f"HHI {hhi:,.0f} — moderately concentrated (1500-2500)")
+        F("🟡MED", f"HHI {hhi:,.0f} (top 10) — moderately concentrated (1500-2500)")
         score += 10
     if 0.20 < top1 <= 0.50:
         F("🟡MED", f"Top holder {top1*100:.1f}% — significant whale risk")
@@ -546,6 +593,32 @@ def score_entity(gp):
     if top5 > 0.80:
         F("🔴HIGH", f"Top 5 holders combined: {top5*100:.1f}% — oligopolistic supply control")
         score += 20
+
+    # Aggregate top-10 stake, independent of how evenly it is spread. Without
+    # this, ten equal wallets holding 90% tripped no size-based flag at all
+    # (top1 was only 9%, top5 only 45%).
+    if top10 > TOP10_EXTREME:
+        F("🔴HIGH", f"Top 10 holders combined: {top10*100:.1f}% — supply is effectively held by a handful of addresses")
+        score += 25
+    elif top10 > TOP10_HIGH:
+        F("🟡MED", f"Top 10 holders combined: {top10*100:.1f}% — concentrated ownership")
+        score += 12
+
+    # Wallet-splitting: a large aggregate stake spread almost evenly. Real
+    # distributions are power-law; uniformity at the top is a fingerprint of one
+    # entity fragmenting a treasury to stay under per-wallet thresholds.
+    if top10 >= SPLIT_MIN_TOP10 and len(shares) >= 5:
+        slice_gini = gini_coefficient(sorted(shares, reverse=True)[:10])
+        if slice_gini <= SPLIT_GINI_STRONG:
+            F("🔴HIGH",
+              f"Wallet-splitting signature: top 10 hold {top10*100:.1f}% but are near-identical in size "
+              f"(Gini {slice_gini:.3f}) — consistent with one entity across many addresses")
+            score += 45
+        elif slice_gini <= SPLIT_GINI_WEAK:
+            F("🟡MED",
+              f"Top 10 hold {top10*100:.1f}% and are unusually evenly sized (Gini {slice_gini:.3f}) — "
+              f"possible wallet splitting")
+            score += 25
 
     for h in holders:
         if (h.get("address") or "").lower() == creator and creator:
@@ -566,16 +639,24 @@ def score_entity(gp):
                 raw_balances.append(float(amt))
             except Exception:
                 pass
+    # BENFORD NOTE: GoPlus returns 10 holders, so this test essentially never
+    # reaches BENFORD_MIN_SAMPLES on GoPlus data alone. It used to run at n=10
+    # and emit confident verdicts ("distribution looks natural") from a sample
+    # far too small for chi-square to mean anything. It now stays silent unless
+    # a genuinely sufficient sample is available — which a richer holder source
+    # (block explorer, indexer) would provide if one is ever wired in.
     if raw_balances:
         chi2, suspicious = benford_chi2(raw_balances)
         if chi2 is not None:
             if suspicious:
-                F("🟡MED", f"Benford test: chi2={chi2} — holder balance distribution deviates from natural law (possible manipulation)")
+                F("🟡MED", f"Benford test: chi2={chi2} on {len(raw_balances)} balances — deviates from natural law (possible manipulation)")
                 score += 12
             else:
-                F("ℹ️ INFO", f"Benford test: chi2={chi2} — holder distribution looks natural")
+                F("ℹ️ INFO", f"Benford test: chi2={chi2} on {len(raw_balances)} balances — distribution looks natural")
         else:
-            F("ℹ️ INFO", f"Benford test: insufficient data ({len(raw_balances)} samples, need 10+)")
+            F("ℹ️ INFO",
+              f"Benford test: not run — {len(raw_balances)} balances available, "
+              f"needs {BENFORD_MIN_SAMPLES}+ for a valid chi-square")
 
     for h in sorted(holders, key=lambda x: float(x.get("percent", 0) or 0), reverse=True)[:5]:
         raw  = float(h.get("percent", 0) or 0)
@@ -587,7 +668,10 @@ def score_entity(gp):
 
     if holder_count:
         F("ℹ️ INFO", f"Total unique holders: {holder_count:,}")
-    F("ℹ️ INFO", f"Top-10: {top10*100:.1f}% | Gini: {gini:.3f} | HHI: {hhi:,.0f}")
+    F("ℹ️ INFO", f"Top-10: {top10*100:.1f}% of supply | Gini {gini:.3f} / HHI {hhi:,.0f} "
+                f"(computed across the top {len(shares)} holders GoPlus returns, not all "
+                f"{holder_count:,} holders)" if holder_count else
+                f"Top-10: {top10*100:.1f}% of supply | Gini {gini:.3f} / HHI {hhi:,.0f} (top-10 slice)")
 
     return min(100, score), flags
 
