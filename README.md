@@ -308,3 +308,42 @@ When GoPlus returns nothing, the honeypot / mint / tax / owner checks never run,
 so the verdict becomes `INCONCLUSIVE — no contract data` rather than a risk grade,
 and the dashboard shows an unsourced-scan banner. A scan built on missing data is
 not a clean bill of health, and it should never look like one.
+
+---
+
+## Ground truth: the pump.fun corpus
+
+The scoring weights below (35% code / 30% liquidity / 20% entity / 15% social) are
+**priors, not calibrated values**. Nothing in this repo has ever verified that a
+high score actually predicts a rug — which is the only question that matters for a
+scam detector.
+
+A companion daemon now supplies the evidence. It watches every new token launch on
+pump.fun — the highest-volume source of brand-new, overwhelmingly fraudulent tokens
+on any chain — and records what happened to each one:
+
+| Label | Meaning |
+|---|---|
+| `rejected` | filter chain refused it up front |
+| `expired` | watched, never built momentum, died quietly |
+| `entered` | cleared every filter |
+| `graduated` | reached PumpSwap — real enough to survive |
+| `rugged` | collapsed inside the rug window |
+
+As of 2026-08-08 that corpus holds **1,020,193 labelled tokens** (695,601 expired,
+307,854 rejected, 8,455 graduated), including **17,577 tokens the filter rejected
+that later graduated** — a 1.74% false-positive rate on the filter chain itself.
+
+**Both error types are the product:**
+
+- a token **rejected** that later graduated → the filter is too strict
+- a token **entered** that then rugged → the filter is too loose
+
+This is deliberately not a trading strategy. No capital is at risk, there are no
+keys, and no real orders are ever placed. The simulated position sizing exists only
+so a filter decision can be weighed: rejecting a token that went on to lose 90% is
+worth more than rejecting one that went sideways, and only a simulated fill
+distinguishes those. Read any SOL figures it reports as **effect size, not income**.
+
+The next step is joining scan scores to these observed outcomes, which is what would
+turn the weights above from priors into measured values. That join is not built yet.
