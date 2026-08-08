@@ -1059,7 +1059,7 @@ def scan_token(address, chain="", no_coingecko=False, no_history=False):
     # A confirmed breaker is still trustworthy (it fired on data we DID get), but a
     # clean-looking grade computed without contract security data is not a grade.
     if not health["primary_ok"] and not breaker:
-        verdict = "INCONCLUSIVE — no contract data"
+        verdict = "INCONCLUSIVE: no contract data"
         all_flags = all_flags + [
             "⚠️ GoPlus returned nothing: honeypot / mint / tax / owner checks did not run. "
             "Treat the score below as unsourced."

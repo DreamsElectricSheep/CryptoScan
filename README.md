@@ -2,22 +2,22 @@
 
 # CryptoScan
 
-Automated cryptocurrency scam detection engine. Input a token contract address — get back a quantified risk score built from four independent analysis pipelines: smart contract security, liquidity pool integrity, on-chain entity concentration, and social presence auditing.
+Automated cryptocurrency scam detection engine. Input a token contract address, get back a quantified risk score built from four independent analysis pipelines: smart contract security, liquidity pool integrity, on-chain entity concentration, and social presence auditing.
 
 Designed for EVM chains (Ethereum, BSC, Base, Polygon, Arbitrum, Avalanche, Optimism) and Solana.
 
 ---
 
-## Why this exists — the risk it addresses
+## Why this exists: the risk it addresses
 
-Retail crypto investors routinely make buy decisions off a handful of positive signals — a locked liquidity pool, an active Twitter account, a large holder count — without checking whether any of those signals were manufactured. This tool replaces that gut-check with a reproducible, four-dimensional read across code, liquidity, holder concentration, and social presence, so a decision has to survive contact with actual contract bytecode and on-chain data, not just vibes.
+Retail crypto investors routinely make buy decisions off a handful of positive signals (a locked liquidity pool, an active Twitter account, a large holder count) without checking whether any of those signals were manufactured. This tool replaces that gut-check with a reproducible, four-dimensional read across code, liquidity, holder concentration, and social presence, so a decision has to survive contact with actual contract bytecode and on-chain data, not just vibes.
 
 ## Safety, autonomy & ethical design
 
-- **Deterministic, auditable scoring — no LLM judgment call in the loop.** Every score is a fixed formula over structured data from free, permissionless APIs. Anyone can recompute a result by hand from the same inputs; nothing here is a black-box opinion.
-- **Circuit breakers exist because linear scoring fails exactly when it matters most.** A token with deep liquidity and a large, active community can still be a 100%-loss honeypot — see the Boolean Circuit Breaker section below for why a single deterministic fraud signature is designed to override every other positive input, rather than being averaged away by them.
-- **Autonomy boundary: this tool scores and reports, it never acts.** It doesn't trade, doesn't hold funds, and doesn't execute anything against the tokens it evaluates — the output is a number and a breakdown for a human to weigh, full stop.
-- **Ethical/responsible-use notes:** every data source is free and permissionless (no scraping behind a paywall or authentication wall, no ToS-violating access); the tool is explicitly a due-diligence aid, not investment advice, and it can produce false negatives (see Limitations below) — a low score is evidence of absence of certain red flags, not proof of legitimacy. It should never be the only check before risking real capital.
+- **Deterministic, auditable scoring: no LLM judgment call in the loop.** Every score is a fixed formula over structured data from free, permissionless APIs. Anyone can recompute a result by hand from the same inputs; nothing here is a black-box opinion.
+- **Circuit breakers exist because linear scoring fails exactly when it matters most.** A token with deep liquidity and a large, active community can still be a 100%-loss honeypot. See the Boolean Circuit Breaker section below for why a single deterministic fraud signature is designed to override every other positive input, rather than being averaged away by them.
+- **Autonomy boundary: this tool scores and reports, it never acts.** It doesn't trade, doesn't hold funds, and doesn't execute anything against the tokens it evaluates. The output is a number and a breakdown for a human to weigh, full stop.
+- **Ethical/responsible-use notes:** every data source is free and permissionless (no scraping behind a paywall or authentication wall, no ToS-violating access); the tool is explicitly a due-diligence aid, not investment advice, and it can produce false negatives (see Limitations below). A low score is evidence of absence of certain red flags, not proof of legitimacy. It should never be the only check before risking real capital.
 
 ---
 
@@ -31,11 +31,11 @@ A Flask-based dashboard is included and runs on port 5006.
 
 ### Fraud Detection in Action
 
-The following scan is of **HoneyMoon (MOON)** — a BSC token with four HIGH-severity code flags: the owner can mint unlimited tokens, the sell tax is dynamically raisable to 100% (the honeypot mechanism), blacklisting allows the owner to freeze individual wallets, and a hidden privileged wallet is concealed from public audit.
+The following scan is of **HoneyMoon (MOON)**, a BSC token with four HIGH-severity code flags: the owner can mint unlimited tokens, the sell tax is dynamically raisable to 100% (the honeypot mechanism), blacklisting allows the owner to freeze individual wallets, and a hidden privileged wallet is concealed from public audit.
 
 ![Fraud example](screenshots/fraud_example.png)
 
-Code Risk scores **100/100** — the maximum. Overall risk score is **65/HIGH RISK**.
+Code Risk scores **100/100**, the maximum. Overall risk score is **65/HIGH RISK**.
 
 ---
 
@@ -60,7 +60,7 @@ Contract Address
 
 ## Risk Scoring System
 
-The core of the validator is a **weighted composite scoring model** with **Boolean circuit breakers** — a non-linear override mechanism that immediately flags tokens containing deterministic, unambiguous fraud signatures regardless of any other positive signals.
+The core of the validator is a **weighted composite scoring model** with **Boolean circuit breakers**: a non-linear override mechanism that immediately flags tokens containing deterministic, unambiguous fraud signatures regardless of any other positive signals.
 
 ### Composite Score Formula
 
@@ -99,51 +99,51 @@ When no circuit breaker fires, the weighted model applies dynamically across fou
 ## Analysis Pipelines
 
 ### 1. Code Risk (35% weight)
-**Source:** [GoPlus Security API](https://gopluslabs.io/en/token-security-api) — free, permissionless, 30+ detection vectors.
+**Source:** [GoPlus Security API](https://gopluslabs.io/en/token-security-api), free, permissionless, 30+ detection vectors.
 
 Evaluates the compiled bytecode and contract architecture for hardcoded malicious logic:
 
-- **Honeypot detection** — transfer restrictions that block non-whitelisted addresses from selling
-- **Infinite mint backdoors** — hidden functions allowing the deployer to generate unlimited supply
-- **Hidden owner** — obfuscated privileged wallet concealed from public audit tools
-- **Upgradeable proxy risk** — unrenounced proxy contracts that can silently swap to a malicious implementation
-- **Dynamic tax manipulation** — `sell_tax` variables modifiable by the owner at runtime (can be raised to 100%)
-- **Blacklisting capability** — `mapping(address => bool)` structures enabling selective account freezing
-- **Source code verification** — unverified bytecode cannot be audited; scored accordingly
-- **Ownership status** — active vs. renounced, with renounced ownership reducing score
+- **Honeypot detection**: transfer restrictions that block non-whitelisted addresses from selling
+- **Infinite mint backdoors**: hidden functions allowing the deployer to generate unlimited supply
+- **Hidden owner**: obfuscated privileged wallet concealed from public audit tools
+- **Upgradeable proxy risk**: unrenounced proxy contracts that can silently swap to a malicious implementation
+- **Dynamic tax manipulation**: `sell_tax` variables modifiable by the owner at runtime (can be raised to 100%)
+- **Blacklisting capability**: `mapping(address => bool)` structures enabling selective account freezing
+- **Source code verification**: unverified bytecode cannot be audited; scored accordingly
+- **Ownership status**: active vs. renounced, with renounced ownership reducing score
 
 ### 2. Liquidity Risk (30% weight)
 **Source:** DexScreener (market data) + GoPlus (LP holder analysis).
 
-Monitors the health of the token's liquidity pool — the most critical infrastructure for a soft rug pull:
+Monitors the health of the token's liquidity pool, the most critical infrastructure for a soft rug pull:
 
-- **LP token lock status** — percentage of Liquidity Provider tokens cryptographically locked via audited third-party timelocks (UNCX Network, Team Finance, etc.) vs. held in an unlocked deployer wallet
-- **Total Value Locked (TVL)** — absolute pool depth; shallow pools are trivially manipulable
-- **Buy/sell ratio anomaly** — extreme buy imbalance (>10:1) with near-zero sells is a wash trading or honeypot signal
-- **Volume/liquidity ratio** — volume exceeding 50× pool depth indicates artificial activity the pool cannot organically sustain
+- **LP token lock status**: percentage of Liquidity Provider tokens cryptographically locked via audited third-party timelocks (UNCX Network, Team Finance, etc.) vs. held in an unlocked deployer wallet
+- **Total Value Locked (TVL)**: absolute pool depth; shallow pools are trivially manipulable
+- **Buy/sell ratio anomaly**: extreme buy imbalance (>10:1) with near-zero sells is a wash trading or honeypot signal
+- **Volume/liquidity ratio**: volume exceeding 50× pool depth indicates artificial activity the pool cannot organically sustain
 
 ### 3. Entity Risk (20% weight)
 **Source:** GoPlus top-holder data.
 
-Runs concentration analysis on the token's holder distribution to detect hidden insider control — a prerequisite for pump-and-dump execution:
+Runs concentration analysis on the token's holder distribution to detect hidden insider control, a prerequisite for pump-and-dump execution:
 
-- **Gini Coefficient** — measures inequality across the known holder distribution. Scores above 0.85 indicate extreme centralization. A Gini of 0 = perfect equality; 1.0 = single entity controls everything.
-- **Herfindahl-Hirschman Index (HHI)** — squares the market share of each entity, heavily penalizing top-heavy distributions. HHI > 2,500 is the regulatory threshold for monopolistic concentration. Applied directly to token supply.
-- **Top-holder concentration** — explicit flags when the top 1 holder exceeds 20%/50%, or when the top 5 combined exceed 80%
-- **Creator wallet tracking** — flags if the deploying address still holds a material percentage of supply
-- **Benford's Law analysis** — chi-square test on raw holder balances; significant deviation from Benford's expected distribution can indicate artificial balance construction
+- **Gini Coefficient**: measures inequality across the known holder distribution. Scores above 0.85 indicate extreme centralization. A Gini of 0 = perfect equality; 1.0 = single entity controls everything.
+- **Herfindahl-Hirschman Index (HHI)**: squares the market share of each entity, heavily penalizing top-heavy distributions. HHI > 2,500 is the regulatory threshold for monopolistic concentration. Applied directly to token supply.
+- **Top-holder concentration**: explicit flags when the top 1 holder exceeds 20%/50%, or when the top 5 combined exceed 80%
+- **Creator wallet tracking**: flags if the deploying address still holds a material percentage of supply
+- **Benford's Law analysis**: chi-square test on raw holder balances; significant deviation from Benford's expected distribution can indicate artificial balance construction
 
 ### 4. Social Risk (15% weight)
 **Source:** DexScreener profile metadata + CoinGecko community data + Wayback Machine + RDAP + X/Twitter syndication API.
 
 Audits the off-chain social footprint for signs of synthetic community construction:
 
-- **Presence audit** — anonymous tokens with no verifiable Twitter/Telegram/website receive significant risk additions
-- **Social history verification** — Wayback Machine CDX API checks when social URLs first appeared; accounts created days before launch are a red flag
-- **Domain age** — RDAP registration data confirms how long the project website domain has existed
-- **X/Twitter account age** — snowflake ID decoding determines exact account creation date; accounts under 90 days old with low follower counts score poorly
-- **Follower count thresholds** — Twitter followers < 500 treated as a high-risk signal for newly spun-up bot farms
-- **Price/engagement anomaly** — price increases > 200% combined with buy-only 1h transaction pressure flag the classic pump-and-dump execution pattern
+- **Presence audit**: anonymous tokens with no verifiable Twitter/Telegram/website receive significant risk additions
+- **Social history verification**: Wayback Machine CDX API checks when social URLs first appeared; accounts created days before launch are a red flag
+- **Domain age**: RDAP registration data confirms how long the project website domain has existed
+- **X/Twitter account age**: snowflake ID decoding determines exact account creation date; accounts under 90 days old with low follower counts score poorly
+- **Follower count thresholds**: Twitter followers < 500 treated as a high-risk signal for newly spun-up bot farms
+- **Price/engagement anomaly**: price increases > 200% combined with buy-only 1h transaction pressure flag the classic pump-and-dump execution pattern
 
 ---
 
@@ -256,10 +256,10 @@ No API keys required. GoPlus, DexScreener, Wayback Machine, RDAP, and the X/Twit
 
 ## Limitations
 
-- **Holder concentration analysis uses GoPlus top-10 data only** — Gini and HHI are computed from the top 10 holders, not the full distribution. These metrics represent an upper-bound estimate of concentration risk.
-- **LP lock detection relies on GoPlus tagging** — LP tokens burned to a dead address (e.g., `0x000...dead`) are not tagged as `is_locked` and may produce false positives on the lock flag.
-- **Social pipeline is metadata-only** — full bot detection (account age analysis, reply swarm NLP, follower graph clustering) requires a headless browser scraping layer not included in this version.
-- **No mempool monitoring** — pre-launch honeypot setups detectable only via symbolic execution of bytecode are flagged through GoPlus rather than custom decompilation.
+- **Holder concentration analysis uses GoPlus top-10 data only.** Gini and HHI are computed from the top 10 holders, not the full distribution. These metrics represent an upper-bound estimate of concentration risk.
+- **LP lock detection relies on GoPlus tagging.** LP tokens burned to a dead address (e.g., `0x000...dead`) are not tagged as `is_locked` and may produce false positives on the lock flag.
+- **Social pipeline is metadata-only.** Full bot detection (account age analysis, reply swarm NLP, follower graph clustering) requires a headless browser scraping layer not included in this version.
+- **No mempool monitoring.** Pre-launch honeypot setups detectable only via symbolic execution of bytecode are flagged through GoPlus rather than custom decompilation.
 
 ---
 
@@ -269,8 +269,8 @@ Adding a token to the watchlist stores a `threshold` (default 15 points). A cron
 job re-scans every watchlisted token and sends a Telegram alert when:
 
 - **risk rises** by at least that token's threshold (`45 → 63` on a 15 threshold fires)
-- **a circuit breaker trips** — confirmed scam, alerted regardless of delta
-- **the scan degrades** — the contract-security source stops answering, so the token
+- **a circuit breaker trips**: confirmed scam, alerted regardless of delta
+- **the scan degrades**: the contract-security source stops answering, so the token
   can no longer be scored. Silence there would read as "nothing changed", which is
   exactly wrong.
 
@@ -290,7 +290,7 @@ job re-scans every watchlisted token and sends a Telegram alert when:
 All seven upstreams (GoPlus, DexScreener, CoinGecko, RugCheck, Wayback, RDAP,
 X syndication) are free and keyless, so any of them can start refusing traffic
 without notice. Every scan result carries a `health` block recording which
-sources answered. Only GoPlus and DexScreener are treated as critical — the rest are
+sources answered. Only GoPlus and DexScreener are treated as critical; the rest are
 enrichment, and Wayback in particular times out often enough that warning on it would
 turn the banner into wallpaper:
 
@@ -305,7 +305,7 @@ turn the banner into wallpaper:
 ```
 
 When GoPlus returns nothing, the honeypot / mint / tax / owner checks never run,
-so the verdict becomes `INCONCLUSIVE — no contract data` rather than a risk grade,
+so the verdict becomes `INCONCLUSIVE: no contract data` rather than a risk grade,
 and the dashboard shows an unsourced-scan banner. A scan built on missing data is
 not a clean bill of health, and it should never look like one.
 
@@ -315,24 +315,24 @@ not a clean bill of health, and it should never look like one.
 
 The scoring weights below (35% code / 30% liquidity / 20% entity / 15% social) are
 **priors, not calibrated values**. Nothing in this repo has ever verified that a
-high score actually predicts a rug — which is the only question that matters for a
+high score actually predicts a rug, which is the only question that matters for a
 scam detector.
 
 A companion daemon now supplies the evidence. It watches every new token launch on
-pump.fun — the highest-volume source of brand-new, overwhelmingly fraudulent tokens
-on any chain — and records what happened to each one:
+pump.fun (the highest-volume source of brand-new, overwhelmingly fraudulent tokens
+on any chain) and records what happened to each one:
 
 | Label | Meaning |
 |---|---|
 | `rejected` | filter chain refused it up front |
 | `expired` | watched, never built momentum, died quietly |
 | `entered` | cleared every filter |
-| `graduated` | reached PumpSwap — real enough to survive |
+| `graduated` | reached PumpSwap, real enough to survive |
 | `rugged` | collapsed inside the rug window |
 
 As of 2026-08-08 that corpus holds **1,020,193 labelled tokens** (695,601 expired,
 307,854 rejected, 8,455 graduated), including **17,577 tokens the filter rejected
-that later graduated** — a 1.74% false-positive rate on the filter chain itself.
+that later graduated**, a 1.74% false-positive rate on the filter chain itself.
 
 **Both error types are the product:**
 
