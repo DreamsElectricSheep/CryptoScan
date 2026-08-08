@@ -18,3 +18,6 @@ restart_validator.sh
 # flock sidecars for the JSON stores
 *.lock
 cryptoscan_0x*.json
+
+# local pre-edit backups
+*.bak_*
