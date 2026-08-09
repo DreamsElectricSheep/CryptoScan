@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-watchlist_monitor.py — re-scan every watchlisted token and alert on risk increases.
+watchlist_monitor.py: re-scan every watchlisted token and alert on risk increases.
 
 Why this exists
 ---------------
-The Watchlist has always persisted `threshold`, `last_score` and `last_checked`
-— fields that only mean something if something re-scans and compares. Nothing
+The Watchlist has always persisted `threshold`, `last_score` and `last_checked`:
+fields that only mean something if something re-scans and compares. Nothing
 ever did: there was no cron entry and the only service was the web UI. So the
 one feature that makes this tool useful without a human sitting in front of it
 was built and left inert (found in the 2026-08-07 audit).
@@ -15,7 +15,7 @@ This closes that loop:
   * alerts when risk RISES by >= that entry's threshold
   * alerts immediately on a circuit breaker (confirmed scam), regardless of delta
   * alerts when a previously-scoreable token goes INCONCLUSIVE (sources dead or
-    contract data pulled) — a scan that stops working must not read as "fine"
+    contract data pulled): a scan that stops working must not read as "fine"
 
 Run:  watchlist_monitor.py [--dry-run] [--force]
 Cron: 0 */6 * * *
@@ -32,7 +32,7 @@ from crypto_scan import (            # noqa: E402
     scan_token, Watchlist, send_telegram, TELEGRAM_TOKEN, CHAT_ID,
 )
 
-# Be polite to the free upstreams — these are keyless public APIs.
+# Be polite to the free upstreams: these are keyless public APIs.
 SLEEP_BETWEEN_SCANS_S = 4
 DEFAULT_THRESHOLD     = 15
 
@@ -54,13 +54,13 @@ def check_one(address, entry):
     health  = result.get('health') or {}
     breaker = result.get('circuit_breaker')
 
-    # 1. Confirmed scam — always alert, no delta needed.
+    # 1. Confirmed scam: always alert, no delta needed.
     if breaker:
         return (
             f"🚨 <b>CONFIRMED SCAM</b>\n"
             f"{name} ({result.get('symbol','?')}) on {result.get('chain','?')}\n"
             f"<code>{address}</code>\n"
-            f"Score {score}/100 — {verdict}\n"
+            f"Score {score}/100: {verdict}\n"
             + _flag_lines(result)
         ), score, verdict
 
@@ -68,10 +68,10 @@ def check_one(address, entry):
     if not health.get('primary_ok', True):
         return (
             f"⚠️ <b>SCAN DEGRADED</b>\n"
-            f"{name} — no contract data this run "
+            f"{name}: no contract data this run "
             f"(failed: {', '.join(health.get('critical_failed') or health.get('failed') or ['unknown'])})\n"
             f"<code>{address}</code>\n"
-            f"Last good score was {prev}. This run is unsourced — not a clean bill of health."
+            f"Last good score was {prev}. This run is unsourced, not a clean bill of health."
         ), None, verdict     # None => don't overwrite last_score with a bad read
 
     # 3. Risk climbed by at least this entry's threshold.
@@ -104,7 +104,7 @@ def main():
     wl    = Watchlist()
     items = wl.list_all()
     if not items:
-        log('watchlist empty — nothing to monitor')
+        log('watchlist empty: nothing to monitor')
         return 0
 
     log(f'checking {len(items)} watchlisted token(s)'
@@ -121,7 +121,7 @@ def main():
             if alert:
                 alerts.append(alert)
             elif args.force:
-                alerts.append(f"ℹ️ {entry.get('name', address[:14])}: {score}/100 — {verdict}")
+                alerts.append(f"ℹ️ {entry.get('name', address[:14])}: {score}/100, {verdict}")
             if score is not None and not args.dry_run:
                 wl.update_score(address, score)
         except Exception as e:
@@ -134,19 +134,19 @@ def main():
         alerts.append(f"⚠️ Crypto Scan watchlist: {errors} token(s) failed to scan this run")
 
     if not alerts:
-        log(f'done — {checked} checked, nothing crossed a threshold, no alert sent')
+        log(f'done: {checked} checked, nothing crossed a threshold, no alert sent')
         return 0
 
-    body = (f"🔍 <b>CRYPTO SCAN — WATCHLIST</b>\n"
+    body = (f"🔍 <b>CRYPTO SCAN: WATCHLIST</b>\n"
             f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | "
             f"{checked}/{len(items)} scanned\n\n" + "\n\n".join(alerts))
 
     if args.dry_run:
-        log('DRY-RUN — would have sent:')
+        log('DRY-RUN: would have sent')
         print(body)
     else:
         send_telegram(body, TELEGRAM_TOKEN, CHAT_ID)
-        log(f'done — {len(alerts)} alert(s) sent')
+        log(f'done: {len(alerts)} alert(s) sent')
     return 0
 
 

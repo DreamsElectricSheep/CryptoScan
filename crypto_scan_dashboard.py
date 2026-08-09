@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-crypto_scan_dashboard.py — Crypto Scan Web Dashboard v2.1
+crypto_scan_dashboard.py: Crypto Scan Web Dashboard v2.1
 Port 5006 | Tabs: Scan | History | Watchlist | Batch
 """
 
@@ -559,7 +559,7 @@ function renderXProfile(metrics) {
   card.style.display = 'block';
 
   if (xp.not_found) {
-    body.innerHTML = `<div class="flag-item f-high">@${xp.handle || '?'} — account not found on X/Twitter (deleted, suspended, or never existed)</div>`;
+    body.innerHTML = `<div class="flag-item f-high">@${xp.handle || '?'}: account not found on X/Twitter (deleted, suspended, or never existed)</div>`;
     return;
   }
 
