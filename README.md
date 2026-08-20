@@ -330,14 +330,35 @@ on any chain) and records what happened to each one:
 | `graduated` | reached PumpSwap, real enough to survive |
 | `rugged` | collapsed inside the rug window |
 
-As of 2026-08-08 that corpus holds **1,020,193 labelled tokens** (695,601 expired,
-307,854 rejected, 8,455 graduated), including **17,577 tokens the filter rejected
-that later graduated**, a 1.74% false-positive rate on the filter chain itself.
+As of 2026-08-19 that corpus holds **1,457,229 labelled tokens**: 985,649 expired,
+459,815 rejected, 11,765 graduated before entry, and **0 entered**.
+
+Zero. Across nearly 1.5 million launches the filter chain has never once passed a
+token. That is a complete failure as a trading strategy and the most useful single
+fact the corpus has produced.
+
+**Missed winners, meaning tokens passed on that graduated anyway: 25,829.** There
+are two ways to read that number and they are not interchangeable:
+
+| Metric | Value | What it measures |
+|---|---|---|
+| missed / whole corpus | **1.77%** | how often a declined launch turned out real |
+| rejected-then-graduated / all rejections | **3.10%** | how often an up-front *rejection* was wrong |
+
+The first is the figure this README has always quoted (it read 1.72% on 2026-08-08,
+so the rate is flat while the sample has grown by 40%). The second is stricter and
+more diagnostic: of 459,815 tokens refused outright, 14,268 went on to graduate. The
+other 11,561 misses were tokens the filter watched but which expired before building
+momentum, which is a timing failure rather than a judgement failure and a separate
+problem to fix.
 
 **Both error types are the product:**
 
 - a token **rejected** that later graduated → the filter is too strict
 - a token **entered** that then rugged → the filter is too loose
+
+Only the first kind has ever been observable here, because nothing has ever been
+entered.
 
 This is deliberately not a trading strategy. No capital is at risk, there are no
 keys, and no real orders are ever placed. The simulated position sizing exists only
