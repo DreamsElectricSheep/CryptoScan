@@ -4,6 +4,8 @@ __pycache__/
 scan_history.json
 watchlist.json
 *.log
+*.log-*
+*.log.*
 
 # Testing/helper scripts not part of public release
 find_scam.py
